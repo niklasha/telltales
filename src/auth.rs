@@ -1,4 +1,4 @@
-use crate::config::TelldusCredentials;
+use crate::{config::TelldusCredentials, http_client::build_http_client};
 use dialoguer::Input;
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
@@ -54,36 +54,38 @@ pub struct AuthOutcome {
 }
 
 pub fn validate(credentials: &mut TelldusCredentials) -> Result<AuthOutcome, AuthError> {
+    let client = build_http_client()?;
+    validate_with_client(&client, credentials)
+}
+
+pub fn validate_with_client(
+    client: &Client,
+    credentials: &mut TelldusCredentials,
+) -> Result<AuthOutcome, AuthError> {
     if credentials.public_key.trim().is_empty() || credentials.private_key.trim().is_empty() {
         return Err(AuthError::MissingConsumerKeys);
     }
-
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent("telltales-cli/0.1 (+https://github.com/niklasha/telltales)")
-        .build()?;
-
     let mut refreshed = false;
 
     if credentials.token.trim().is_empty() || credentials.token_secret.trim().is_empty() {
-        let (token, secret) = oauth_dance(&client, credentials)?;
+        let (token, secret) = oauth_dance(client, credentials)?;
         credentials.token = token;
         credentials.token_secret = secret;
         refreshed = true;
     }
 
-    match verify_profile(&client, credentials) {
+    match verify_profile(client, credentials) {
         Ok(name) => Ok(AuthOutcome {
             tokens_refreshed: refreshed,
             account_name: name,
         }),
         Err(AuthError::Unauthorized) => {
             println!("Stored tokens were rejected by Telldus Live; starting OAuth flow.");
-            let (token, secret) = oauth_dance(&client, credentials)?;
+            let (token, secret) = oauth_dance(client, credentials)?;
             credentials.token = token;
             credentials.token_secret = secret;
             refreshed = true;
-            let name = verify_profile(&client, credentials)?;
+            let name = verify_profile(client, credentials)?;
             Ok(AuthOutcome {
                 tokens_refreshed: refreshed,
                 account_name: name,

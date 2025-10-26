@@ -44,6 +44,29 @@ cargo run -- devices edit --id 6942590 --protocol zwave --model switches
 
 At least one of `--name`, `--protocol`, or `--model` must be supplied. The command calls the Telldus Live `device/setName`, `device/setProtocol`, and `device/setModel` endpoints to persist your changes.
 
+## Adding or removing devices
+
+Register a new 433 MHz device on a specific TellStick client:
+
+```
+cargo run -- devices add \
+  --client-id 367974 \
+  --name "Taklampa" \
+  --protocol selflearning \
+  --model selflearning-switch \
+  --parameter house=A \
+  --parameter unit=1 \
+  --learn
+```
+
+The command wraps `device/add`, sets any TellStick parameters with `device/setDeviceParameter`, and optionally triggers `device/learn` when `--learn` is supplied. Removing a device is equally simple:
+
+```
+cargo run -- devices remove --id 14257766
+```
+
+Telldus drops the device from both Live and the controlling TellStick.
+
 ## Controlling devices
 
 Invoke Telldus Live actions directly from the CLI:
@@ -64,6 +87,16 @@ cargo run -- devices execute --id 6942590 --command 15
 cargo run -- devices up --id 6942590
 cargo run -- devices stop --id 6942590
 cargo run -- devices down --id 6942590
+```
+
+The CLI exposes additional maintenance helpers:
+
+```
+# Inspect full device payload
+cargo run -- devices info --id 6942590
+
+# Review recent device events (count defaults to Telldus' server-side limit)
+cargo run -- devices history --id 6942590 --limit 10
 
 # Manage TellStick parameters
 cargo run -- devices set-parameter --id 6942590 --parameter house --value A
@@ -71,13 +104,6 @@ cargo run -- devices get-parameter --id 6942590 --parameter house
 
 # Device learn mode
 cargo run -- devices learn --id 6942590
-```
-
-Introspection helpers:
-
-```
-cargo run -- devices info --id 6942590
-cargo run -- devices history --id 6942590 --limit 10
 ```
 
 ## Inspecting sensors

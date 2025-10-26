@@ -4,8 +4,11 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use reqwest_oauth1::{Error as OAuth1Error, OAuthClientProvider, Secrets};
 use serde_json::Value;
-use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread;
 use std::time::Duration;
 use thiserror::Error;
 use url::Url;
@@ -37,6 +40,10 @@ pub enum AuthError {
     MissingVerifier,
     #[error("redirect URL missing oauth_verifier parameter")]
     VerifierNotFound,
+    #[error("callback listener failed: {0}")]
+    CallbackListener(String),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("prompt failed")]
     Prompt(#[from] dialoguer::Error),
 }
@@ -90,29 +97,40 @@ fn oauth_dance(
     client: &Client,
     credentials: &TelldusCredentials,
 ) -> Result<(String, String), AuthError> {
-    let temp = request_token(client, &credentials.public_key, &credentials.private_key)?;
+    let callback = CallbackServer::start()?;
+    let temp = request_token(
+        client,
+        &credentials.public_key,
+        &credentials.private_key,
+        &callback.callback_url,
+    )?;
     let authorize_url = format!("{AUTHORIZE_URL}?oauth_token={}", temp.token);
-    println!(
-        "Open the following URL in your browser, authorize access, and press the “Confirm” button:"
-    );
+    println!("Open this URL in your browser to authorize Telldus Live access:");
     println!("{authorize_url}");
     println!(
-        "Return here and paste either the verification code Telldus shows or the full redirect URL after you pressed “Confirm”."
+        "After approving, Telldus Live redirects to {}.\n\
+If the CLI captures the redirect automatically, you can close the browser tab.\n\
+Otherwise, copy the full redirect URL (or the code shown) and paste it below.",
+        callback.callback_url
     );
 
-    let verifier_input: String = Input::new()
-        .with_prompt("Verification code or redirect URL")
-        .allow_empty(false)
-        .interact_text()?;
-
-    let verifier = extract_verifier(&verifier_input)?;
+    let verifier = match callback.wait_for_verifier(Duration::from_secs(300))? {
+        Some(code) => code,
+        None => {
+            let verifier_input: String = Input::new()
+                .with_prompt("Verification code or redirect URL")
+                .allow_empty(false)
+                .interact_text()?;
+            extract_verifier(&verifier_input)?
+        }
+    };
 
     exchange_access_token(
         client,
         &credentials.public_key,
         &credentials.private_key,
         temp,
-        verifier.trim(),
+        &verifier,
     )
 }
 
@@ -120,13 +138,14 @@ fn request_token(
     client: &Client,
     consumer_key: &str,
     consumer_secret: &str,
+    callback_url: &str,
 ) -> Result<TempToken, AuthError> {
     let secrets = Secrets::new(consumer_key, consumer_secret);
     let response = client
         .clone()
         .oauth1(secrets)
         .post(REQUEST_TOKEN_URL)
-        .query(&[("oauth_callback", "oob")])
+        .query(&[("oauth_callback", callback_url)])
         .send()?
         .error_for_status()?
         .text()?;
@@ -215,7 +234,93 @@ struct TempToken {
     secret: String,
 }
 
-fn extract_verifier(input: &str) -> Result<Cow<'_, str>, AuthError> {
+struct CallbackServer {
+    callback_url: String,
+    receiver: mpsc::Receiver<Result<String, AuthError>>,
+}
+
+impl CallbackServer {
+    fn start() -> Result<Self, AuthError> {
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let callback_url = format!("http://127.0.0.1:{port}/telltales/callback");
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            if let Err(err) = wait_for_callback(listener, tx.clone()) {
+                let _ = tx.send(Err(err));
+            }
+        });
+
+        Ok(Self {
+            callback_url,
+            receiver: rx,
+        })
+    }
+
+    fn wait_for_verifier(self, timeout: Duration) -> Result<Option<String>, AuthError> {
+        match self.receiver.recv_timeout(timeout) {
+            Ok(Ok(v)) => Ok(Some(v)),
+            Ok(Err(e)) => Err(e),
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(AuthError::CallbackListener("channel closed".into()))
+            }
+        }
+    }
+}
+
+fn wait_for_callback(
+    listener: TcpListener,
+    tx: Sender<Result<String, AuthError>>,
+) -> Result<(), AuthError> {
+    match listener.accept() {
+        Ok((mut stream, _)) => {
+            let mut buffer = [0u8; 4096];
+            let read = stream.read(&mut buffer)?;
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            let first_line = request.lines().next().unwrap_or_default();
+            let path = first_line.split_whitespace().nth(1).unwrap_or("/");
+            let parsed_url = Url::parse(&format!("http://localhost{path}")).map_err(|err| {
+                AuthError::CallbackListener(format!("failed to parse redirect URL: {err}"))
+            })?;
+
+            if let Some((_, value)) = parsed_url
+                .query_pairs()
+                .find(|(key, _)| key == "oauth_verifier")
+            {
+                let verifier = value.into_owned();
+                let response_body = "<html><body><h2>Telldus Live authorization complete.</h2>\
+<p>You can close this window and return to the Telltales CLI.</p></body></html>";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
+                let _ = tx.send(Ok(verifier));
+                Ok(())
+            } else {
+                let response_body = "<html><body><h2>Authorization error</h2>\
+<p>Missing oauth_verifier parameter. Please return to the CLI and try again.</p></body></html>";
+                let response = format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
+                Err(AuthError::VerifierNotFound)
+            }
+        }
+        Err(err) => Err(AuthError::CallbackListener(format!(
+            "failed to accept connection: {err}"
+        ))),
+    }
+}
+
+fn extract_verifier(input: &str) -> Result<String, AuthError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(AuthError::MissingVerifier);
@@ -228,7 +333,7 @@ fn extract_verifier(input: &str) -> Result<Cow<'_, str>, AuthError> {
                     if value.is_empty() {
                         return Err(AuthError::MissingVerifier);
                     }
-                    return Ok(Cow::Owned(value.into_owned()));
+                    return Ok(value.into_owned());
                 }
             }
             return Err(AuthError::VerifierNotFound);
@@ -236,7 +341,7 @@ fn extract_verifier(input: &str) -> Result<Cow<'_, str>, AuthError> {
         return Err(AuthError::VerifierNotFound);
     }
 
-    Ok(Cow::Borrowed(trimmed))
+    Ok(trimmed.to_owned())
 }
 
 fn parse_token_response(body: &str) -> Result<TempToken, AuthError> {

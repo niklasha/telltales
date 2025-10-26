@@ -187,11 +187,13 @@ fn verify_profile(
     }
 
     let value: Value = response.error_for_status()?.json()?;
-    let status = value
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    if status != "success" {
+    let status = value.get("status").and_then(|v| v.as_str());
+    let success = match status {
+        Some("success") | None => true,
+        _ => false,
+    };
+
+    if !success {
         let extract = |key: &str| -> Option<String> {
             value.get(key).and_then(|v| match v {
                 Value::String(s) => Some(s.clone()),
@@ -203,17 +205,20 @@ fn verify_profile(
             .or_else(|| extract("message"))
             .unwrap_or_else(|| value.to_string());
         return Err(AuthError::VerificationFailed(format!(
-            "{status}: {context}"
+            "{}: {}",
+            status.unwrap_or("unknown"),
+            context
         )));
     }
 
-    let account = value.get("user").and_then(|user| {
-        let first = user
+    let user_obj = value.get("user").unwrap_or(&value);
+    let account = user_obj.as_object().and_then(|map| {
+        let first = map
             .get("firstname")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .trim();
-        let last = user
+        let last = map
             .get("lastname")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
@@ -229,8 +234,9 @@ fn verify_profile(
             composed.push_str(last);
         }
         if composed.is_empty() {
-            user.get("username")
+            map.get("username")
                 .and_then(|v| v.as_str())
+                .or_else(|| map.get("email").and_then(|v| v.as_str()))
                 .map(|s| s.to_string())
         } else {
             Some(composed)

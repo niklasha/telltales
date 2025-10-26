@@ -32,7 +32,7 @@ pub enum AuthError {
     AuthorizationDenied,
     #[error("OAuth response missing field `{0}`")]
     MissingField(&'static str),
-    #[error("Telldus Live rejected the request with status {0}")]
+    #[error("Telldus Live rejected the request: {0}")]
     VerificationFailed(String),
     #[error("stored tokens were rejected; please re-authorize")]
     Unauthorized,
@@ -192,7 +192,19 @@ fn verify_profile(
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
     if status != "success" {
-        return Err(AuthError::VerificationFailed(status.to_string()));
+        let extract = |key: &str| -> Option<String> {
+            value.get(key).and_then(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                _ => Some(v.to_string()),
+            })
+        };
+
+        let context = extract("error")
+            .or_else(|| extract("message"))
+            .unwrap_or_else(|| value.to_string());
+        return Err(AuthError::VerificationFailed(format!(
+            "{status}: {context}"
+        )));
     }
 
     let account = value.get("user").and_then(|user| {

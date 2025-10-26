@@ -7,6 +7,7 @@ use api::TelldusApi;
 use clap::{Parser, Subcommand, ValueEnum};
 use config::{TelldusCredentials, credentials_path, ensure_credentials, save_credentials};
 use http_client::build_http_client;
+use serde_json::to_string_pretty;
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -28,6 +29,11 @@ enum Commands {
     Devices {
         #[command(subcommand)]
         command: Option<DeviceCommand>,
+    },
+    /// Inspect Telldus Live sensors
+    Sensors {
+        #[command(subcommand)]
+        command: Option<SensorCommand>,
     },
 }
 
@@ -60,6 +66,83 @@ enum DeviceCommand {
         #[arg(long)]
         model: Option<String>,
     },
+    /// Turn on a device
+    On {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Turn off a device
+    Off {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Dim a device to a level (0-255)
+    Dim {
+        #[arg(long = "id")]
+        device_id: String,
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=255))]
+        level: u8,
+    },
+    /// Trigger a doorbell action
+    Bell {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Execute a Telldus command number
+    Execute {
+        #[arg(long = "id")]
+        device_id: String,
+        #[arg(long)]
+        command: i32,
+    },
+    /// Start an upwards movement
+    Up {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Stop movement
+    Stop {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Start a downwards movement
+    Down {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Put device into learning mode
+    Learn {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Inspect device details
+    Info {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+    /// Show recent device history
+    History {
+        #[arg(long = "id")]
+        device_id: String,
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Persist a device parameter key/value
+    SetParameter {
+        #[arg(long = "id")]
+        device_id: String,
+        #[arg(long)]
+        parameter: String,
+        #[arg(long)]
+        value: String,
+    },
+    /// Retrieve a device parameter value
+    GetParameter {
+        #[arg(long = "id")]
+        device_id: String,
+        #[arg(long)]
+        parameter: String,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -68,6 +151,29 @@ enum DeviceKind {
     Controllers,
     Devices,
     Sensors,
+}
+
+#[derive(Subcommand)]
+enum SensorCommand {
+    /// Show sensor metadata
+    Info {
+        #[arg(long = "id")]
+        sensor_id: String,
+        /// Optional scale (e.g. 0 for temperature, 1 for humidity)
+        #[arg(long)]
+        scale: Option<i32>,
+    },
+    /// Show historic sensor readings
+    History {
+        #[arg(long = "id")]
+        sensor_id: String,
+        /// Telldus scale identifier
+        #[arg(long)]
+        scale: i32,
+        /// Optional number of entries
+        #[arg(long)]
+        limit: Option<u32>,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -111,6 +217,73 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 protocol,
                 model,
             } => handle_devices_edit(&device_id, name, protocol, model),
+            DeviceCommand::On { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_turn_on(id),
+                || "Turned device on.".into(),
+            ),
+            DeviceCommand::Off { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_turn_off(id),
+                || "Turned device off.".into(),
+            ),
+            DeviceCommand::Dim { device_id, level } => handle_device_simple(
+                &device_id,
+                move |api, id| api.device_dim(id, level),
+                move || format!("Dimmed device to level {level}."),
+            ),
+            DeviceCommand::Bell { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_bell(id),
+                || "Triggered bell.".into(),
+            ),
+            DeviceCommand::Execute { device_id, command } => handle_device_simple(
+                &device_id,
+                move |api, id| api.device_execute(id, command),
+                move || format!("Executed command {command}."),
+            ),
+            DeviceCommand::Up { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_up(id),
+                || "Sent up command.".into(),
+            ),
+            DeviceCommand::Stop { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_stop(id),
+                || "Sent stop command.".into(),
+            ),
+            DeviceCommand::Down { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_down(id),
+                || "Sent down command.".into(),
+            ),
+            DeviceCommand::Learn { device_id } => handle_device_simple(
+                &device_id,
+                |api, id| api.device_learn(id),
+                || "Device put into learn mode.".into(),
+            ),
+            DeviceCommand::Info { device_id } => handle_device_info(&device_id),
+            DeviceCommand::History { device_id, limit } => handle_device_history(&device_id, limit),
+            DeviceCommand::SetParameter {
+                device_id,
+                parameter,
+                value,
+            } => handle_device_set_parameter(&device_id, &parameter, &value),
+            DeviceCommand::GetParameter {
+                device_id,
+                parameter,
+            } => handle_device_get_parameter(&device_id, &parameter),
+        },
+        Commands::Sensors { command } => match command {
+            Some(SensorCommand::Info { sensor_id, scale }) => handle_sensor_info(&sensor_id, scale),
+            Some(SensorCommand::History {
+                sensor_id,
+                scale,
+                limit,
+            }) => handle_sensor_history(&sensor_id, scale, limit),
+            None => Err(AppError::Usage(
+                "Specify a sensors subcommand (info/history).".into(),
+            )),
         },
     }
 }
@@ -135,7 +308,7 @@ fn handle_validate() -> Result<(), AppError> {
 }
 
 fn handle_devices_list(kind: DeviceKind) -> Result<(), AppError> {
-    let session = authenticate_for_devices()?;
+    let session = authenticate()?;
     let api = TelldusApi::new(&session.client, &session.credentials);
     let mut entries = match kind {
         DeviceKind::All => {
@@ -191,7 +364,7 @@ fn handle_devices_edit(
         ));
     }
 
-    let session = authenticate_for_devices()?;
+    let session = authenticate()?;
     let api = TelldusApi::new(&session.client, &session.credentials);
 
     if let Some(ref new_name) = name {
@@ -211,12 +384,92 @@ fn handle_devices_edit(
     Ok(())
 }
 
+fn handle_device_simple<F, S>(device_id: &str, action: F, message: S) -> Result<(), AppError>
+where
+    F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
+    S: FnOnce() -> String,
+{
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    action(&api, device_id)?;
+    println!("{}", message());
+    Ok(())
+}
+
+fn handle_device_info(device_id: &str) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    let info = api.device_info(device_id)?;
+    print_json(&info);
+    Ok(())
+}
+
+fn handle_device_history(device_id: &str, limit: Option<u32>) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    let entries = api.device_history(device_id, limit)?;
+    if entries.is_empty() {
+        println!("No history entries found.");
+    } else {
+        for (idx, entry) in entries.iter().enumerate() {
+            println!("-- Event {} --", idx + 1);
+            print_json(entry);
+        }
+    }
+    Ok(())
+}
+
+fn handle_device_set_parameter(
+    device_id: &str,
+    parameter: &str,
+    value: &str,
+) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    api.set_device_parameter(device_id, parameter, value)?;
+    println!("Set parameter '{parameter}' for device {device_id} to '{value}'.");
+    Ok(())
+}
+
+fn handle_device_get_parameter(device_id: &str, parameter: &str) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    match api.get_device_parameter(device_id, parameter)? {
+        Some(value) => println!("Parameter '{parameter}' = '{value}'"),
+        None => println!("Parameter '{parameter}' not set for device {device_id}."),
+    }
+    Ok(())
+}
+
+fn handle_sensor_info(sensor_id: &str, scale: Option<i32>) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    let info = api.sensor_info(sensor_id, scale)?;
+    print_json(&info);
+    Ok(())
+}
+
+fn handle_sensor_history(sensor_id: &str, scale: i32, limit: Option<u32>) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    let entries = api.sensor_history(sensor_id, scale, limit)?;
+    if entries.is_empty() {
+        println!("No sensor history entries found.");
+    } else {
+        for (idx, entry) in entries.iter().enumerate() {
+            println!("-- Reading {} --", idx + 1);
+            print_json(entry);
+        }
+    }
+    Ok(())
+}
+
 struct Session {
     client: reqwest::blocking::Client,
     credentials: TelldusCredentials,
 }
 
-fn authenticate_for_devices() -> Result<Session, AppError> {
+fn authenticate() -> Result<Session, AppError> {
     let mut credentials = ensure_credentials()?;
     let location = credentials_path()?;
     println!("Using credentials file at {}", location.to_string_lossy());
@@ -235,4 +488,11 @@ fn authenticate_for_devices() -> Result<Session, AppError> {
         client,
         credentials,
     })
+}
+
+fn print_json(value: &serde_json::Value) {
+    match to_string_pretty(value) {
+        Ok(text) => println!("{text}"),
+        Err(_) => println!("{value}"),
+    }
 }

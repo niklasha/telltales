@@ -45,16 +45,23 @@ pub struct Entry {
     pub details: Option<String>,
 }
 
-pub struct TelldusApi<'a> {
-    client: &'a Client,
-    credentials: &'a TelldusCredentials,
-}
-
 pub struct AddDeviceRequest<'a> {
     pub client_id: &'a str,
     pub name: &'a str,
     pub protocol: &'a str,
     pub model: &'a str,
+}
+
+pub struct SensorUpdateRequest<'a> {
+    pub id: &'a str,
+    pub name: Option<&'a str>,
+    pub location: Option<&'a str>,
+    pub ignored: Option<bool>,
+}
+
+pub struct TelldusApi<'a> {
+    client: &'a Client,
+    credentials: &'a TelldusCredentials,
 }
 
 impl<'a> TelldusApi<'a> {
@@ -182,150 +189,6 @@ impl<'a> TelldusApi<'a> {
     }
 
     pub fn device_turn_on(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/turnOn", id, vec![])
-    }
-
-    pub fn device_turn_off(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/turnOff", id, vec![])
-    }
-
-    pub fn device_dim(&self, id: &str, level: u8) -> Result<(), ApiError> {
-        self.device_action(
-            "/json/device/dim",
-            id,
-            vec![("level".into(), level.to_string())],
-        )
-    }
-
-    pub fn device_bell(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/bell", id, vec![])
-    }
-
-    pub fn device_up(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/up", id, vec![])
-    }
-
-    pub fn device_down(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/down", id, vec![])
-    }
-
-    pub fn device_stop(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/stop", id, vec![])
-    }
-
-    pub fn device_execute(&self, id: &str, command: i32) -> Result<(), ApiError> {
-        self.device_action(
-            "/json/device/execute",
-            id,
-            vec![("command".into(), command.to_string())],
-        )
-    }
-
-    pub fn device_learn(&self, id: &str) -> Result<(), ApiError> {
-        self.device_action("/json/device/learn", id, vec![])
-    }
-
-    pub fn set_device_name(&self, id: &str, name: &str) -> Result<(), ApiError> {
-        let payload = self.get_json_owned(
-            "/json/device/setName",
-            vec![("id".into(), id.into()), ("name".into(), name.into())],
-        )?;
-        ensure_success(&payload)
-    }
-
-    pub fn set_device_model(&self, id: &str, model: &str) -> Result<(), ApiError> {
-        let payload = self.get_json_owned(
-            "/json/device/setModel",
-            vec![("id".into(), id.into()), ("model".into(), model.into())],
-        )?;
-        ensure_success(&payload)
-    }
-
-    pub fn set_device_protocol(&self, id: &str, protocol: &str) -> Result<(), ApiError> {
-        let payload = self.get_json_owned(
-            "/json/device/setProtocol",
-            vec![
-                ("id".into(), id.into()),
-                ("protocol".into(), protocol.into()),
-            ],
-        )?;
-        ensure_success(&payload)
-    }
-
-    pub fn set_device_parameter(
-        &self,
-        id: &str,
-        parameter: &str,
-        value: &str,
-    ) -> Result<(), ApiError> {
-        let payload = self.get_json_owned(
-            "/json/device/setDeviceParameter",
-            vec![
-                ("id".into(), id.into()),
-                ("parameter".into(), parameter.into()),
-                ("value".into(), value.into()),
-            ],
-        )?;
-        ensure_success(&payload)
-    }
-
-    pub fn get_device_parameter(
-        &self,
-        id: &str,
-        parameter: &str,
-    ) -> Result<Option<String>, ApiError> {
-        let payload = self.get_json_owned(
-            "/json/device/getDeviceParameter",
-            vec![
-                ("id".into(), id.into()),
-                ("parameter".into(), parameter.into()),
-            ],
-        )?;
-        Ok(payload
-            .get("value")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string()))
-    }
-
-    pub fn device_info(&self, id: &str) -> Result<Value, ApiError> {
-        self.get_json("/json/device/info", &[("id", id)])
-    }
-
-    pub fn device_history(&self, id: &str, limit: Option<u32>) -> Result<Vec<Value>, ApiError> {
-        let mut params = vec![("id".into(), id.into())];
-        if let Some(limit) = limit {
-            params.push(("limit".into(), limit.to_string()));
-        }
-        let payload = self.get_json_owned("/json/device/history", params)?;
-        Ok(array_from(&payload, &["history"]))
-    }
-
-    pub fn sensor_info(&self, id: &str, scale: Option<i32>) -> Result<Value, ApiError> {
-        let mut params = vec![("id".into(), id.into())];
-        if let Some(scale) = scale {
-            params.push(("scale".into(), scale.to_string()));
-        }
-        self.get_json_owned("/json/sensor/info", params)
-    }
-
-    pub fn sensor_history(
-        &self,
-        id: &str,
-        scale: i32,
-        limit: Option<u32>,
-    ) -> Result<Vec<Value>, ApiError> {
-        let mut params = vec![
-            ("id".into(), id.into()),
-            ("scale".into(), scale.to_string()),
-        ];
-        if let Some(limit) = limit {
-            params.push(("limit".into(), limit.to_string()));
-        }
-        let payload = self.get_json_owned("/json/sensor/history", params)?;
-        Ok(array_from(&payload, &["history"]))
-    }
-
-    pub fn device_turn_on(&self, id: &str) -> Result<(), ApiError> {
         self.device_action("/json/device/turnOn", id, Vec::new())
     }
 
@@ -367,6 +230,24 @@ impl<'a> TelldusApi<'a> {
 
     pub fn device_learn(&self, id: &str) -> Result<(), ApiError> {
         self.device_action("/json/device/learn", id, Vec::new())
+    }
+
+    pub fn set_device_name(&self, id: &str, name: &str) -> Result<(), ApiError> {
+        let payload = self.get_json("/json/device/setName", &[("id", id), ("name", name)])?;
+        ensure_success(&payload)
+    }
+
+    pub fn set_device_model(&self, id: &str, model: &str) -> Result<(), ApiError> {
+        let payload = self.get_json("/json/device/setModel", &[("id", id), ("model", model)])?;
+        ensure_success(&payload)
+    }
+
+    pub fn set_device_protocol(&self, id: &str, protocol: &str) -> Result<(), ApiError> {
+        let payload = self.get_json(
+            "/json/device/setProtocol",
+            &[("id", id), ("protocol", protocol)],
+        )?;
+        ensure_success(&payload)
     }
 
     pub fn set_device_parameter(
@@ -464,6 +345,21 @@ impl<'a> TelldusApi<'a> {
         }
         let payload = self.get_json_owned("/json/sensor/history", params)?;
         Ok(array_from(&payload, &["history"]))
+    }
+
+    pub fn sensor_update(&self, request: SensorUpdateRequest<'_>) -> Result<(), ApiError> {
+        let mut params: Vec<(String, String)> = vec![("id".into(), request.id.into())];
+        if let Some(name) = request.name {
+            params.push(("name".into(), name.into()));
+        }
+        if let Some(location) = request.location {
+            params.push(("location".into(), location.into()));
+        }
+        if let Some(ignored) = request.ignored {
+            params.push(("ignored".into(), if ignored { "1" } else { "0" }.into()));
+        }
+        let payload = self.get_json_owned("/json/sensor/update", params)?;
+        ensure_success(&payload)
     }
 
     fn get_json(&self, path: &str, params: &[(&str, &str)]) -> Result<Value, ApiError> {

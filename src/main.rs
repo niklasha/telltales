@@ -3,8 +3,8 @@ mod auth;
 mod config;
 mod http_client;
 
-use api::{AddDeviceRequest, TelldusApi};
-use clap::{Parser, Subcommand, ValueEnum};
+use api::{AddDeviceRequest, SensorUpdateRequest, TelldusApi};
+use clap::{Parser, Subcommand, ValueEnum, builder::BoolishValueParser};
 use config::{TelldusCredentials, credentials_path, ensure_credentials, save_credentials};
 use http_client::build_http_client;
 use serde_json::to_string_pretty;
@@ -66,8 +66,6 @@ enum DeviceCommand {
         #[arg(long)]
         model: Option<String>,
     },
-<<<<<<< HEAD
-=======
     /// Register a new Telldus Live device
     Add {
         /// Controller (client) identifier that will own the device
@@ -94,7 +92,6 @@ enum DeviceCommand {
         #[arg(long = "id")]
         device_id: String,
     },
->>>>>>> 2252d5c (Support Telldus device registration and removal)
     /// Turn on a device
     On {
         #[arg(long = "id")]
@@ -172,8 +169,6 @@ enum DeviceCommand {
         #[arg(long)]
         parameter: String,
     },
-<<<<<<< HEAD
-=======
 }
 
 #[derive(Subcommand)]
@@ -197,7 +192,20 @@ enum SensorCommand {
         #[arg(long)]
         limit: Option<u32>,
     },
->>>>>>> 2252d5c (Support Telldus device registration and removal)
+    /// Update sensor metadata
+    Update {
+        #[arg(long = "id")]
+        sensor_id: String,
+        /// Optional friendly name
+        #[arg(long)]
+        name: Option<String>,
+        /// Optional location string
+        #[arg(long)]
+        location: Option<String>,
+        /// Mark sensor as ignored (true) or active (false)
+        #[arg(long, value_parser = BoolishValueParser::new())]
+        ignored: Option<bool>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -206,29 +214,6 @@ enum DeviceKind {
     Controllers,
     Devices,
     Sensors,
-}
-
-#[derive(Subcommand)]
-enum SensorCommand {
-    /// Show sensor metadata
-    Info {
-        #[arg(long = "id")]
-        sensor_id: String,
-        /// Optional scale (e.g. 0 for temperature, 1 for humidity)
-        #[arg(long)]
-        scale: Option<i32>,
-    },
-    /// Show historic sensor readings
-    History {
-        #[arg(long = "id")]
-        sensor_id: String,
-        /// Telldus scale identifier
-        #[arg(long)]
-        scale: i32,
-        /// Optional number of entries
-        #[arg(long)]
-        limit: Option<u32>,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -278,8 +263,6 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 protocol,
                 model,
             } => handle_devices_edit(&device_id, name, protocol, model),
-<<<<<<< HEAD
-=======
             DeviceCommand::Add {
                 client_id,
                 name,
@@ -289,7 +272,6 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 learn,
             } => handle_device_add(&client_id, &name, &protocol, &model, parameters, learn),
             DeviceCommand::Remove { device_id } => handle_device_remove(&device_id),
->>>>>>> 2252d5c (Support Telldus device registration and removal)
             DeviceCommand::On { device_id } => handle_device_simple(
                 &device_id,
                 |api, id| api.device_turn_on(id),
@@ -354,8 +336,14 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 scale,
                 limit,
             }) => handle_sensor_history(&sensor_id, scale, limit),
+            Some(SensorCommand::Update {
+                sensor_id,
+                name,
+                location,
+                ignored,
+            }) => handle_sensor_update(&sensor_id, name, location, ignored),
             None => Err(AppError::Usage(
-                "Specify a sensors subcommand (info/history).".into(),
+                "Specify a sensors subcommand (info/history/update).".into(),
             )),
         },
     }
@@ -457,12 +445,6 @@ fn handle_devices_edit(
     Ok(())
 }
 
-<<<<<<< HEAD
-fn handle_device_simple<F, S>(device_id: &str, action: F, message: S) -> Result<(), AppError>
-where
-    F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
-    S: FnOnce() -> String,
-=======
 fn handle_device_add(
     client_id: &str,
     name: &str,
@@ -513,17 +495,12 @@ fn handle_device_simple<F, M>(device_id: &str, action: F, message: M) -> Result<
 where
     F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
     M: FnOnce() -> String,
->>>>>>> 2252d5c (Support Telldus device registration and removal)
 {
     let session = authenticate()?;
     let api = TelldusApi::new(&session.client, &session.credentials);
     action(&api, device_id)?;
-<<<<<<< HEAD
-    println!("{}", message());
-=======
     let text = message();
     println!("{text}");
->>>>>>> 2252d5c (Support Telldus device registration and removal)
     Ok(())
 }
 
@@ -595,6 +572,30 @@ fn handle_sensor_history(sensor_id: &str, scale: i32, limit: Option<u32>) -> Res
     Ok(())
 }
 
+fn handle_sensor_update(
+    sensor_id: &str,
+    name: Option<String>,
+    location: Option<String>,
+    ignored: Option<bool>,
+) -> Result<(), AppError> {
+    if name.is_none() && location.is_none() && ignored.is_none() {
+        return Err(AppError::Usage(
+            "Nothing to update; supply at least one of --name, --location, or --ignored.".into(),
+        ));
+    }
+
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    api.sensor_update(SensorUpdateRequest {
+        id: sensor_id,
+        name: name.as_deref(),
+        location: location.as_deref(),
+        ignored,
+    })?;
+    println!("Updated sensor {sensor_id}.");
+    Ok(())
+}
+
 struct Session {
     client: reqwest::blocking::Client,
     credentials: TelldusCredentials,
@@ -627,8 +628,6 @@ fn print_json(value: &serde_json::Value) {
         Err(_) => println!("{value}"),
     }
 }
-<<<<<<< HEAD
-=======
 
 fn parse_key_value(arg: &str) -> Result<KeyValue, String> {
     let mut parts = arg.splitn(2, '=');
@@ -646,4 +645,3 @@ fn parse_key_value(arg: &str) -> Result<KeyValue, String> {
         value: value.to_string(),
     })
 }
->>>>>>> 2252d5c (Support Telldus device registration and removal)

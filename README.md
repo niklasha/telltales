@@ -113,6 +113,7 @@ Fetch sensor metadata and historic values (scales follow Telldus Live convention
 ```
 cargo run -- sensors info --id 1534643827 --scale 0
 cargo run -- sensors history --id 1534643827 --scale 0 --limit 20
+cargo run -- sensors update --id 1534643827 --ignored true --name "Utomhus"
 ```
 
 All network interactions reuse the shared OAuth session and respect a one-second rate limit window to comply with Telldus Live throttling.

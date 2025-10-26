@@ -1,7 +1,8 @@
+mod auth;
 mod config;
 
 use clap::{Parser, Subcommand};
-use config::{credentials_path, ensure_credentials};
+use config::{credentials_path, ensure_credentials, save_credentials};
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -31,6 +32,8 @@ enum AuthCommand {
 enum AppError {
     #[error(transparent)]
     Config(#[from] config::ConfigError),
+    #[error(transparent)]
+    Auth(#[from] auth::AuthError),
 }
 
 fn main() -> ExitCode {
@@ -54,14 +57,20 @@ fn run(cli: Cli) -> Result<(), AppError> {
 }
 
 fn handle_validate() -> Result<(), AppError> {
-    let credentials = ensure_credentials()?;
+    let mut credentials = ensure_credentials()?;
     let location = credentials_path()?;
-    println!(
-        "Found Telldus Live credentials at {}",
-        location.to_string_lossy()
-    );
-    if credentials.is_complete() {
-        println!("Credentials are present and ready for API requests.");
+    println!("Using credentials file at {}", location.to_string_lossy());
+
+    let outcome = auth::validate(&mut credentials)?;
+    if outcome.tokens_refreshed {
+        save_credentials(&credentials)?;
+        println!("Stored refreshed OAuth access token.");
+    }
+
+    if let Some(name) = outcome.account_name {
+        println!("Authenticated as {name}.");
+    } else {
+        println!("Credentials verified with Telldus Live.");
     }
     Ok(())
 }

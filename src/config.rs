@@ -75,7 +75,7 @@ fn load_credentials() -> Result<Option<TelldusCredentials>, ConfigError> {
     Ok(Some(parsed))
 }
 
-fn save_credentials(credentials: &TelldusCredentials) -> Result<(), ConfigError> {
+pub fn save_credentials(credentials: &TelldusCredentials) -> Result<(), ConfigError> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir)
         .map_err(|err| ConfigError::CreateDirFailed(display_path(&dir), err))?;
@@ -96,11 +96,9 @@ fn prompt_for_missing(creds: &mut TelldusCredentials) -> Result<(), ConfigError>
     creds.public_key = prompt_field("Public API key", &creds.public_key, false)?;
     creds.private_key = prompt_field("Private API key", &creds.private_key, true)?;
     if creds.token.trim().is_empty() || creds.token_secret.trim().is_empty() {
-        println!(
-            "OAuth access token details are optional for validation and can be set later via the OAuth flow."
-        );
+        println!("OAuth access tokens will be generated automatically during validation.");
     } else {
-        println!("Existing OAuth access token details detected; leaving untouched.");
+        println!("Existing OAuth access token details detected; they will be reused unless reauthorization is required.");
     }
 
     Ok(())

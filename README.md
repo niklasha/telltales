@@ -42,7 +42,7 @@ Provide additional fields to update the protocol or model in the same call:
 cargo run -- devices edit --id 6942590 --protocol zwave --model switches
 ```
 
-At least one of `--name`, `--protocol`, or `--model` must be supplied. The command calls the Telldus Live `device/setName`, `device/setProtocol`, and `device/setModel` endpoints under the hood to persist your changes.
+At least one of `--name`, `--protocol`, or `--model` must be supplied. The command calls the Telldus Live `device/setName`, `device/setProtocol`, and `device/setModel` endpoints to persist your changes.
 
 ## Controlling devices
 
@@ -64,20 +64,20 @@ cargo run -- devices execute --id 6942590 --command 15
 cargo run -- devices up --id 6942590
 cargo run -- devices stop --id 6942590
 cargo run -- devices down --id 6942590
-```
 
-The CLI exposes additional maintenance helpers:
-
-```
-# Inspect full device payload
-cargo run -- devices info --id 6942590
-
-# Review recent device events (count defaults to Telldus' server-side limit)
-cargo run -- devices history --id 6942590 --limit 10
-
-# Update TellStick-specific parameters
+# Manage TellStick parameters
 cargo run -- devices set-parameter --id 6942590 --parameter house --value A
 cargo run -- devices get-parameter --id 6942590 --parameter house
+
+# Device learn mode
+cargo run -- devices learn --id 6942590
+```
+
+Introspection helpers:
+
+```
+cargo run -- devices info --id 6942590
+cargo run -- devices history --id 6942590 --limit 10
 ```
 
 ## Inspecting sensors
@@ -89,4 +89,4 @@ cargo run -- sensors info --id 1534643827 --scale 0
 cargo run -- sensors history --id 1534643827 --scale 0 --limit 20
 ```
 
-All network interactions reuse the shared OAuth session and observe a one-second rate limit window to comply with Telldus Live throttling.
+All network interactions reuse the shared OAuth session and respect a one-second rate limit window to comply with Telldus Live throttling.

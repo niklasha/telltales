@@ -3,7 +3,7 @@ mod auth;
 mod config;
 mod http_client;
 
-use api::TelldusApi;
+use api::{AddDeviceRequest, TelldusApi};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::{TelldusCredentials, credentials_path, ensure_credentials, save_credentials};
 use http_client::build_http_client;
@@ -66,6 +66,35 @@ enum DeviceCommand {
         #[arg(long)]
         model: Option<String>,
     },
+<<<<<<< HEAD
+=======
+    /// Register a new Telldus Live device
+    Add {
+        /// Controller (client) identifier that will own the device
+        #[arg(long = "client-id")]
+        client_id: String,
+        /// Human readable name
+        #[arg(long)]
+        name: String,
+        /// Device protocol (e.g. "selflearning" or "zwave")
+        #[arg(long)]
+        protocol: String,
+        /// Device model identifier
+        #[arg(long)]
+        model: String,
+        /// Optional TellStick parameter values in key=value form
+        #[arg(long = "parameter", value_parser = parse_key_value)]
+        parameters: Vec<KeyValue>,
+        /// Immediately trigger Learn mode after creating the device
+        #[arg(long)]
+        learn: bool,
+    },
+    /// Remove a device from Telldus Live
+    Remove {
+        #[arg(long = "id")]
+        device_id: String,
+    },
+>>>>>>> 2252d5c (Support Telldus device registration and removal)
     /// Turn on a device
     On {
         #[arg(long = "id")]
@@ -143,6 +172,32 @@ enum DeviceCommand {
         #[arg(long)]
         parameter: String,
     },
+<<<<<<< HEAD
+=======
+}
+
+#[derive(Subcommand)]
+enum SensorCommand {
+    /// Show sensor metadata
+    Info {
+        #[arg(long = "id")]
+        sensor_id: String,
+        /// Optional scale (e.g. 0 for temperature, 1 for humidity)
+        #[arg(long)]
+        scale: Option<i32>,
+    },
+    /// Show historic sensor readings
+    History {
+        #[arg(long = "id")]
+        sensor_id: String,
+        /// Telldus scale identifier
+        #[arg(long)]
+        scale: i32,
+        /// Optional number of entries
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+>>>>>>> 2252d5c (Support Telldus device registration and removal)
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -190,6 +245,12 @@ enum AppError {
     Usage(String),
 }
 
+#[derive(Clone, Debug)]
+struct KeyValue {
+    key: String,
+    value: String,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     if let Err(err) = run(cli) {
@@ -217,6 +278,18 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 protocol,
                 model,
             } => handle_devices_edit(&device_id, name, protocol, model),
+<<<<<<< HEAD
+=======
+            DeviceCommand::Add {
+                client_id,
+                name,
+                protocol,
+                model,
+                parameters,
+                learn,
+            } => handle_device_add(&client_id, &name, &protocol, &model, parameters, learn),
+            DeviceCommand::Remove { device_id } => handle_device_remove(&device_id),
+>>>>>>> 2252d5c (Support Telldus device registration and removal)
             DeviceCommand::On { device_id } => handle_device_simple(
                 &device_id,
                 |api, id| api.device_turn_on(id),
@@ -384,15 +457,73 @@ fn handle_devices_edit(
     Ok(())
 }
 
+<<<<<<< HEAD
 fn handle_device_simple<F, S>(device_id: &str, action: F, message: S) -> Result<(), AppError>
 where
     F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
     S: FnOnce() -> String,
+=======
+fn handle_device_add(
+    client_id: &str,
+    name: &str,
+    protocol: &str,
+    model: &str,
+    parameters: Vec<KeyValue>,
+    learn: bool,
+) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+
+    let new_id = api.add_device(AddDeviceRequest {
+        client_id,
+        name,
+        protocol,
+        model,
+    })?;
+    println!("Created device {new_id} on client {client_id}.");
+
+    for kv in parameters {
+        api.set_device_parameter(&new_id, &kv.key, &kv.value)?;
+        println!(
+            "Set parameter '{key}' = '{value}'",
+            key = kv.key,
+            value = kv.value
+        );
+    }
+
+    if learn {
+        println!(
+            "Triggering learn mode for device {new_id}. Activate the remote within the Telldus timeout window."
+        );
+        api.device_learn(&new_id)?;
+    }
+
+    Ok(())
+}
+
+fn handle_device_remove(device_id: &str) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    api.remove_device(device_id)?;
+    println!("Removed device {device_id}.");
+    Ok(())
+}
+
+fn handle_device_simple<F, M>(device_id: &str, action: F, message: M) -> Result<(), AppError>
+where
+    F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
+    M: FnOnce() -> String,
+>>>>>>> 2252d5c (Support Telldus device registration and removal)
 {
     let session = authenticate()?;
     let api = TelldusApi::new(&session.client, &session.credentials);
     action(&api, device_id)?;
+<<<<<<< HEAD
     println!("{}", message());
+=======
+    let text = message();
+    println!("{text}");
+>>>>>>> 2252d5c (Support Telldus device registration and removal)
     Ok(())
 }
 
@@ -496,3 +627,23 @@ fn print_json(value: &serde_json::Value) {
         Err(_) => println!("{value}"),
     }
 }
+<<<<<<< HEAD
+=======
+
+fn parse_key_value(arg: &str) -> Result<KeyValue, String> {
+    let mut parts = arg.splitn(2, '=');
+    let key = parts
+        .next()
+        .map(|k| k.trim())
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "parameter must be in key=value format".to_string())?;
+    let value = parts
+        .next()
+        .map(|v| v.trim())
+        .ok_or_else(|| "parameter must be in key=value format".to_string())?;
+    Ok(KeyValue {
+        key: key.to_string(),
+        value: value.to_string(),
+    })
+}
+>>>>>>> 2252d5c (Support Telldus device registration and removal)

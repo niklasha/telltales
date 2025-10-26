@@ -45,12 +45,6 @@ impl TelldusCredentials {
         if self.private_key.trim().is_empty() {
             missing.push("private_key");
         }
-        if self.token.trim().is_empty() {
-            missing.push("token");
-        }
-        if self.token_secret.trim().is_empty() {
-            missing.push("token_secret");
-        }
         missing
     }
 
@@ -101,8 +95,13 @@ fn prompt_for_missing(creds: &mut TelldusCredentials) -> Result<(), ConfigError>
 
     creds.public_key = prompt_field("Public API key", &creds.public_key, false)?;
     creds.private_key = prompt_field("Private API key", &creds.private_key, true)?;
-    creds.token = prompt_field("Access token", &creds.token, false)?;
-    creds.token_secret = prompt_field("Access token secret", &creds.token_secret, true)?;
+    if creds.token.trim().is_empty() || creds.token_secret.trim().is_empty() {
+        println!(
+            "OAuth access token details are optional for validation and can be set later via the OAuth flow."
+        );
+    } else {
+        println!("Existing OAuth access token details detected; leaving untouched.");
+    }
 
     Ok(())
 }

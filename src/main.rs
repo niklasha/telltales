@@ -5,7 +5,7 @@ mod http_client;
 
 use api::TelldusApi;
 use clap::{Parser, Subcommand, ValueEnum};
-use config::{credentials_path, ensure_credentials, save_credentials};
+use config::{TelldusCredentials, credentials_path, ensure_credentials, save_credentials};
 use http_client::build_http_client;
 use std::process::ExitCode;
 use thiserror::Error;
@@ -45,6 +45,21 @@ enum DeviceCommand {
         #[arg(short, long, value_enum, default_value_t = DeviceKind::All)]
         kind: DeviceKind,
     },
+    /// Update Telldus Live device metadata
+    Edit {
+        /// Telldus device identifier
+        #[arg(long = "id")]
+        device_id: String,
+        /// New display name
+        #[arg(long)]
+        name: Option<String>,
+        /// New protocol value
+        #[arg(long)]
+        protocol: Option<String>,
+        /// New model value
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -65,6 +80,8 @@ enum AppError {
     Api(#[from] api::ApiError),
     #[error(transparent)]
     Http(#[from] reqwest::Error),
+    #[error("{0}")]
+    Usage(String),
 }
 
 fn main() -> ExitCode {
@@ -88,6 +105,12 @@ fn run(cli: Cli) -> Result<(), AppError> {
             kind: DeviceKind::All,
         }) {
             DeviceCommand::List { kind } => handle_devices_list(kind),
+            DeviceCommand::Edit {
+                device_id,
+                name,
+                protocol,
+                model,
+            } => handle_devices_edit(&device_id, name, protocol, model),
         },
     }
 }
@@ -112,21 +135,8 @@ fn handle_validate() -> Result<(), AppError> {
 }
 
 fn handle_devices_list(kind: DeviceKind) -> Result<(), AppError> {
-    let mut credentials = ensure_credentials()?;
-    let location = credentials_path()?;
-    println!("Using credentials file at {}", location.to_string_lossy());
-
-    let client = build_http_client()?;
-    let outcome = auth::validate_with_client(&client, &mut credentials)?;
-    if outcome.tokens_refreshed {
-        save_credentials(&credentials)?;
-        println!("Stored refreshed OAuth access token.");
-    }
-    if let Some(name) = outcome.account_name {
-        println!("Authenticated as {name}.");
-    }
-
-    let api = TelldusApi::new(&client, &credentials);
+    let session = authenticate_for_devices()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
     let mut entries = match kind {
         DeviceKind::All => {
             let mut combined = Vec::new();
@@ -167,4 +177,62 @@ fn handle_devices_list(kind: DeviceKind) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+fn handle_devices_edit(
+    device_id: &str,
+    name: Option<String>,
+    protocol: Option<String>,
+    model: Option<String>,
+) -> Result<(), AppError> {
+    if name.is_none() && protocol.is_none() && model.is_none() {
+        return Err(AppError::Usage(
+            "Nothing to update; supply at least one of --name, --protocol, or --model.".into(),
+        ));
+    }
+
+    let session = authenticate_for_devices()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+
+    if let Some(ref new_name) = name {
+        api.set_device_name(device_id, new_name)?;
+        println!("Updated device {device_id} name to '{new_name}'.");
+    }
+    if let Some(ref protocol) = protocol {
+        api.set_device_protocol(device_id, protocol)?;
+        println!("Updated device {device_id} protocol to '{protocol}'.");
+    }
+    if let Some(ref model) = model {
+        api.set_device_model(device_id, model)?;
+        println!("Updated device {device_id} model to '{model}'.");
+    }
+
+    println!("Device update complete.");
+    Ok(())
+}
+
+struct Session {
+    client: reqwest::blocking::Client,
+    credentials: TelldusCredentials,
+}
+
+fn authenticate_for_devices() -> Result<Session, AppError> {
+    let mut credentials = ensure_credentials()?;
+    let location = credentials_path()?;
+    println!("Using credentials file at {}", location.to_string_lossy());
+
+    let client = build_http_client()?;
+    let outcome = auth::validate_with_client(&client, &mut credentials)?;
+    if outcome.tokens_refreshed {
+        save_credentials(&credentials)?;
+        println!("Stored refreshed OAuth access token.");
+    }
+    if let Some(name) = outcome.account_name {
+        println!("Authenticated as {name}.");
+    }
+
+    Ok(Session {
+        client,
+        credentials,
+    })
 }

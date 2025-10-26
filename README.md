@@ -27,3 +27,19 @@ cargo run -- devices list --kind sensors
 ```
 
 Each row shows the resource type, numeric identifier, display name, and a short summary of known attributes.
+
+## Editing devices
+
+Rename or adjust metadata for a device:
+
+```
+cargo run -- devices edit --id 6942590 --name "Kitchen Counter"
+```
+
+Provide additional fields to update the protocol or model in the same call:
+
+```
+cargo run -- devices edit --id 6942590 --protocol zwave --model switches
+```
+
+At least one of `--name`, `--protocol`, or `--model` must be supplied. The command calls the Telldus Live `device/setName`, `device/setProtocol`, and `device/setModel` endpoints under the hood to persist your changes.

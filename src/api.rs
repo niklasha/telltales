@@ -174,6 +174,24 @@ impl<'a> TelldusApi<'a> {
             .collect())
     }
 
+    pub fn set_device_name(&self, id: &str, name: &str) -> Result<(), ApiError> {
+        let params = [("id", id), ("deviceId", id), ("name", name)];
+        let response = self.get_json("/json/device/setName", &params)?;
+        ensure_success(&response)
+    }
+
+    pub fn set_device_model(&self, id: &str, model: &str) -> Result<(), ApiError> {
+        let params = [("id", id), ("deviceId", id), ("model", model)];
+        let response = self.get_json("/json/device/setModel", &params)?;
+        ensure_success(&response)
+    }
+
+    pub fn set_device_protocol(&self, id: &str, protocol: &str) -> Result<(), ApiError> {
+        let params = [("id", id), ("deviceId", id), ("protocol", protocol)];
+        let response = self.get_json("/json/device/setProtocol", &params)?;
+        ensure_success(&response)
+    }
+
     fn get_json(&self, path: &str, params: &[(&str, &str)]) -> Result<Value, ApiError> {
         let url = format!("{BASE_URL}{path}");
         let secrets = Secrets::new(&self.credentials.public_key, &self.credentials.private_key)
@@ -245,4 +263,24 @@ fn details_to_string(mut parts: Vec<String>) -> Option<String> {
     } else {
         Some(parts.join(", "))
     }
+}
+
+fn ensure_success(value: &Value) -> Result<(), ApiError> {
+    if let Some(status) = value.get("status").and_then(Value::as_str) {
+        if status.eq_ignore_ascii_case("success") {
+            return Ok(());
+        }
+        let detail = value
+            .get("error")
+            .or_else(|| value.get("message"))
+            .map(Value::to_string)
+            .unwrap_or_else(|| value.to_string());
+        return Err(ApiError::Unexpected(format!("{status}: {detail}")));
+    }
+
+    if value.get("error").is_some() || value.get("message").is_some() {
+        return Err(ApiError::Unexpected(value.to_string()));
+    }
+
+    Ok(())
 }

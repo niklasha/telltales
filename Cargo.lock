@@ -1463,6 +1463,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_yaml",
  "thiserror",
+ "url",
 ]
 
 [[package]]

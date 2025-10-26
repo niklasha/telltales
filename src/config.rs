@@ -98,7 +98,9 @@ fn prompt_for_missing(creds: &mut TelldusCredentials) -> Result<(), ConfigError>
     if creds.token.trim().is_empty() || creds.token_secret.trim().is_empty() {
         println!("OAuth access tokens will be generated automatically during validation.");
     } else {
-        println!("Existing OAuth access token details detected; they will be reused unless reauthorization is required.");
+        println!(
+            "Existing OAuth access token details detected; they will be reused unless reauthorization is required."
+        );
     }
 
     Ok(())

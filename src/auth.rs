@@ -4,9 +4,11 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use reqwest_oauth1::{Error as OAuth1Error, OAuthClientProvider, Secrets};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
+use url::Url;
 
 const REQUEST_TOKEN_URL: &str = "https://pa-api.telldus.com/oauth/requestToken";
 const AUTHORIZE_URL: &str = "https://pa-api.telldus.com/oauth/authorize";
@@ -31,6 +33,10 @@ pub enum AuthError {
     VerificationFailed(String),
     #[error("stored tokens were rejected; please re-authorize")]
     Unauthorized,
+    #[error("authorization code or redirect URL is required")]
+    MissingVerifier,
+    #[error("redirect URL missing oauth_verifier parameter")]
+    VerifierNotFound,
     #[error("prompt failed")]
     Prompt(#[from] dialoguer::Error),
 }
@@ -87,19 +93,19 @@ fn oauth_dance(
     let temp = request_token(client, &credentials.public_key, &credentials.private_key)?;
     let authorize_url = format!("{AUTHORIZE_URL}?oauth_token={}", temp.token);
     println!(
-        "Open the following URL in your browser, authorize access, and paste the provided PIN code:"
+        "Open the following URL in your browser, authorize access, and press the “Confirm” button:"
     );
     println!("{authorize_url}");
-    let verifier: String = Input::new()
-        .with_prompt("Authorization code")
-        .validate_with(|input: &String| {
-            if input.trim().is_empty() {
-                Err("Authorization code cannot be empty")
-            } else {
-                Ok(())
-            }
-        })
+    println!(
+        "Return here and paste either the verification code Telldus shows or the full redirect URL after you pressed “Confirm”."
+    );
+
+    let verifier_input: String = Input::new()
+        .with_prompt("Verification code or redirect URL")
+        .allow_empty(false)
         .interact_text()?;
+
+    let verifier = extract_verifier(&verifier_input)?;
 
     exchange_access_token(
         client,
@@ -207,6 +213,30 @@ fn verify_profile(
 struct TempToken {
     token: String,
     secret: String,
+}
+
+fn extract_verifier(input: &str) -> Result<Cow<'_, str>, AuthError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AuthError::MissingVerifier);
+    }
+
+    if let Ok(url) = Url::parse(trimmed) {
+        if let Some(query) = url.query() {
+            for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+                if key == "oauth_verifier" {
+                    if value.is_empty() {
+                        return Err(AuthError::MissingVerifier);
+                    }
+                    return Ok(Cow::Owned(value.into_owned()));
+                }
+            }
+            return Err(AuthError::VerifierNotFound);
+        }
+        return Err(AuthError::VerifierNotFound);
+    }
+
+    Ok(Cow::Borrowed(trimmed))
 }
 
 fn parse_token_response(body: &str) -> Result<TempToken, AuthError> {

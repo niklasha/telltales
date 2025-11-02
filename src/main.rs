@@ -3,8 +3,8 @@ mod auth;
 mod config;
 mod http_client;
 
-use api::{AddDeviceRequest, TelldusApi};
-use clap::{Parser, Subcommand, ValueEnum};
+use api::{AddDeviceRequest, SensorUpdateRequest, TelldusApi};
+use clap::{Parser, Subcommand, ValueEnum, builder::BoolishValueParser};
 use config::{TelldusCredentials, credentials_path, ensure_credentials, save_credentials};
 use http_client::build_http_client;
 use serde_json::to_string_pretty;
@@ -53,39 +53,27 @@ enum DeviceCommand {
     },
     /// Update Telldus Live device metadata
     Edit {
-        /// Telldus device identifier
         #[arg(long = "id")]
         device_id: String,
-        /// New display name
         #[arg(long)]
         name: Option<String>,
-        /// New protocol value
         #[arg(long)]
         protocol: Option<String>,
-        /// New model value
         #[arg(long)]
         model: Option<String>,
     },
-<<<<<<< HEAD
-=======
     /// Register a new Telldus Live device
     Add {
-        /// Controller (client) identifier that will own the device
         #[arg(long = "client-id")]
         client_id: String,
-        /// Human readable name
         #[arg(long)]
         name: String,
-        /// Device protocol (e.g. "selflearning" or "zwave")
         #[arg(long)]
         protocol: String,
-        /// Device model identifier
         #[arg(long)]
         model: String,
-        /// Optional TellStick parameter values in key=value form
         #[arg(long = "parameter", value_parser = parse_key_value)]
         parameters: Vec<KeyValue>,
-        /// Immediately trigger Learn mode after creating the device
         #[arg(long)]
         learn: bool,
     },
@@ -94,7 +82,6 @@ enum DeviceCommand {
         #[arg(long = "id")]
         device_id: String,
     },
->>>>>>> 2252d5c (Support Telldus device registration and removal)
     /// Turn on a device
     On {
         #[arg(long = "id")]
@@ -172,32 +159,6 @@ enum DeviceCommand {
         #[arg(long)]
         parameter: String,
     },
-<<<<<<< HEAD
-=======
-}
-
-#[derive(Subcommand)]
-enum SensorCommand {
-    /// Show sensor metadata
-    Info {
-        #[arg(long = "id")]
-        sensor_id: String,
-        /// Optional scale (e.g. 0 for temperature, 1 for humidity)
-        #[arg(long)]
-        scale: Option<i32>,
-    },
-    /// Show historic sensor readings
-    History {
-        #[arg(long = "id")]
-        sensor_id: String,
-        /// Telldus scale identifier
-        #[arg(long)]
-        scale: i32,
-        /// Optional number of entries
-        #[arg(long)]
-        limit: Option<u32>,
-    },
->>>>>>> 2252d5c (Support Telldus device registration and removal)
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -214,7 +175,6 @@ enum SensorCommand {
     Info {
         #[arg(long = "id")]
         sensor_id: String,
-        /// Optional scale (e.g. 0 for temperature, 1 for humidity)
         #[arg(long)]
         scale: Option<i32>,
     },
@@ -222,12 +182,17 @@ enum SensorCommand {
     History {
         #[arg(long = "id")]
         sensor_id: String,
-        /// Telldus scale identifier
         #[arg(long)]
         scale: i32,
-        /// Optional number of entries
         #[arg(long)]
         limit: Option<u32>,
+    },
+    /// Toggle ignore flag for a sensor
+    Ignore {
+        #[arg(long = "id")]
+        sensor_id: String,
+        #[arg(long, value_parser = BoolishValueParser::new())]
+        ignored: bool,
     },
 }
 
@@ -278,8 +243,6 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 protocol,
                 model,
             } => handle_devices_edit(&device_id, name, protocol, model),
-<<<<<<< HEAD
-=======
             DeviceCommand::Add {
                 client_id,
                 name,
@@ -289,7 +252,6 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 learn,
             } => handle_device_add(&client_id, &name, &protocol, &model, parameters, learn),
             DeviceCommand::Remove { device_id } => handle_device_remove(&device_id),
->>>>>>> 2252d5c (Support Telldus device registration and removal)
             DeviceCommand::On { device_id } => handle_device_simple(
                 &device_id,
                 |api, id| api.device_turn_on(id),
@@ -354,8 +316,11 @@ fn run(cli: Cli) -> Result<(), AppError> {
                 scale,
                 limit,
             }) => handle_sensor_history(&sensor_id, scale, limit),
+            Some(SensorCommand::Ignore { sensor_id, ignored }) => {
+                handle_sensor_ignore(&sensor_id, ignored)
+            }
             None => Err(AppError::Usage(
-                "Specify a sensors subcommand (info/history).".into(),
+                "Specify a sensors subcommand (info/history/ignore).".into(),
             )),
         },
     }
@@ -457,12 +422,6 @@ fn handle_devices_edit(
     Ok(())
 }
 
-<<<<<<< HEAD
-fn handle_device_simple<F, S>(device_id: &str, action: F, message: S) -> Result<(), AppError>
-where
-    F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
-    S: FnOnce() -> String,
-=======
 fn handle_device_add(
     client_id: &str,
     name: &str,
@@ -492,9 +451,7 @@ fn handle_device_add(
     }
 
     if learn {
-        println!(
-            "Triggering learn mode for device {new_id}. Activate the remote within the Telldus timeout window."
-        );
+        println!("Triggering learn mode for device {new_id}. Activate the remote now.");
         api.device_learn(&new_id)?;
     }
 
@@ -513,17 +470,11 @@ fn handle_device_simple<F, M>(device_id: &str, action: F, message: M) -> Result<
 where
     F: FnOnce(&TelldusApi, &str) -> Result<(), api::ApiError>,
     M: FnOnce() -> String,
->>>>>>> 2252d5c (Support Telldus device registration and removal)
 {
     let session = authenticate()?;
     let api = TelldusApi::new(&session.client, &session.credentials);
     action(&api, device_id)?;
-<<<<<<< HEAD
     println!("{}", message());
-=======
-    let text = message();
-    println!("{text}");
->>>>>>> 2252d5c (Support Telldus device registration and removal)
     Ok(())
 }
 
@@ -595,6 +546,21 @@ fn handle_sensor_history(sensor_id: &str, scale: i32, limit: Option<u32>) -> Res
     Ok(())
 }
 
+fn handle_sensor_ignore(sensor_id: &str, ignored: bool) -> Result<(), AppError> {
+    let session = authenticate()?;
+    let api = TelldusApi::new(&session.client, &session.credentials);
+    api.sensor_set_ignored(SensorUpdateRequest {
+        id: sensor_id,
+        ignored,
+    })?;
+    if ignored {
+        println!("Sensor {sensor_id} is now ignored.");
+    } else {
+        println!("Sensor {sensor_id} is now active.");
+    }
+    Ok(())
+}
+
 struct Session {
     client: reqwest::blocking::Client,
     credentials: TelldusCredentials,
@@ -627,8 +593,6 @@ fn print_json(value: &serde_json::Value) {
         Err(_) => println!("{value}"),
     }
 }
-<<<<<<< HEAD
-=======
 
 fn parse_key_value(arg: &str) -> Result<KeyValue, String> {
     let mut parts = arg.splitn(2, '=');
@@ -646,4 +610,3 @@ fn parse_key_value(arg: &str) -> Result<KeyValue, String> {
         value: value.to_string(),
     })
 }
->>>>>>> 2252d5c (Support Telldus device registration and removal)
